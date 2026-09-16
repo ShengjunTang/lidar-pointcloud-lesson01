@@ -1,0 +1,6 @@
+.open3d-env/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+._*

@@ -26,12 +26,15 @@ GUI_FONT = ("PingFang SC", 12)
 
 
 class PointCloudTeachingTool:
+    """点云课堂演示工具的主窗口，负责数据处理、交互控制和三维绘制。"""
+
     def __init__(self, root: tk.Tk, pcd_path: Optional[Path] = None):
         self.root = root
         self.root.title("LiDAR 点云课堂演示工具")
         self.root.geometry("1680x860")
         self.root.minsize(1460, 720)
 
+        # cloud 保存当前操作对象；original_cloud 用于执行“重置”。
         self.pcd_path = pcd_path
         self.cloud: Optional[o3d.geometry.PointCloud] = None
         self.original_cloud: Optional[o3d.geometry.PointCloud] = None
@@ -46,9 +49,12 @@ class PointCloudTeachingTool:
         self._show_step_code("cloud")
 
     def _build_ui(self) -> None:
+        """创建左侧操作区、中间代码区和右侧三维显示区。"""
+
         outer = tk.Frame(self.root, padx=12, pady=12)
         outer.pack(fill=tk.BOTH, expand=True)
 
+        # 左栏：按课堂讲解顺序排列各处理步骤。
         left = tk.Frame(outer, width=220)
         left.pack(side=tk.LEFT, fill=tk.Y)
         left.pack_propagate(False)
@@ -77,6 +83,7 @@ class PointCloudTeachingTool:
             fill=tk.X, padx=8
         )
 
+        # 中栏：同步展示当前操作对应的 Open3D 核心代码。
         mid = tk.Frame(outer, width=380)
         mid.pack(side=tk.LEFT, fill=tk.Y)
         mid.pack_propagate(False)
@@ -86,6 +93,7 @@ class PointCloudTeachingTool:
         self.code_box.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
         self.code_box.configure(state="disabled")
 
+        # 右栏：将 Matplotlib 三维画布嵌入 Tkinter 窗口。
         right = tk.Frame(outer)
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(12, 0))
 
@@ -104,6 +112,8 @@ class PointCloudTeachingTool:
         auto.pack(side=tk.BOTTOM, pady=(0, 8), padx=8)
 
     def _safe_load(self) -> Optional[o3d.geometry.PointCloud]:
+        """读取点云并剔除包含 NaN 或无穷值的无效坐标。"""
+
         if self.pcd_path is None:
             self.status_var.set("请先点击“加载点云”选择 PCD 文件")
             return None
@@ -116,6 +126,7 @@ class PointCloudTeachingTool:
             self.status_var.set("读取到空点云")
             return None
 
+        # Open3D 点集转为 NumPy 数组，便于逐行检查三个坐标是否均有效。
         xyz = np.asarray(cloud.points)
         finite = np.isfinite(xyz).all(axis=1)
         xyz = xyz[finite]
@@ -123,6 +134,7 @@ class PointCloudTeachingTool:
             self.status_var.set("点云中无有效 XYZ")
             return None
 
+        # 将清洗后的坐标写回 Open3D；若存在颜色，也使用同一掩码保持对应关系。
         cloud.points = o3d.utility.Vector3dVector(xyz)
         if cloud.has_colors():
             colors = np.asarray(cloud.colors)
@@ -131,6 +143,8 @@ class PointCloudTeachingTool:
         return cloud
 
     def load_cloud(self) -> None:
+        """弹出文件选择框，加载点云并保存一份可恢复的原始副本。"""
+
         selected = filedialog.askopenfilename(
             parent=self.root,
             title="选择点云文件",
@@ -152,6 +166,8 @@ class PointCloudTeachingTool:
         self._show_step_code("cloud")
 
     def reset_view(self) -> None:
+        """丢弃当前显示状态，恢复为刚加载时的点云。"""
+
         if self.cloud is None:
             return
         self.cloud = copy_cloud(self.original_cloud)
@@ -176,6 +192,8 @@ class PointCloudTeachingTool:
         )
 
     def _render_panel(self, title: str = "点云演示", point_data=None, colors=None, centroid=None, aabb=None) -> None:
+        """在内嵌三维坐标轴中绘制点云及可选的质心、AABB。"""
+
         if self.fig is None or self.ax is None:
             return
 
@@ -189,6 +207,7 @@ class PointCloudTeachingTool:
         if point_data is not None and len(point_data) > 0:
             if colors is not None:
                 colors = np.asarray(colors)
+            # 大点云只均匀抽取约 5 万点用于显示，降低课堂演示时的刷新延迟。
             if len(point_data) > 50000:
                 step = max(1, len(point_data) // 50000)
                 idx = np.arange(0, len(point_data), step)
@@ -208,6 +227,7 @@ class PointCloudTeachingTool:
             self.ax.set_xlim(xmin, xmax)
             self.ax.set_ylim(ymin, ymax)
             self.ax.set_zlim(zmin, zmax)
+            # 使用真实 XYZ 跨度设置显示比例，避免场景被压扁或拉长。
             self.ax.set_box_aspect((max(xmax - xmin, 1e-6), max(ymax - ymin, 1e-6), max(zmax - zmin, 1e-6)))
             self.ax.view_init(elev=24, azim=-50)
 
@@ -216,6 +236,7 @@ class PointCloudTeachingTool:
             self.ax.scatter([cx], [cy], [cz], color="red", s=80)
 
         if aabb is not None:
+            # 根据最小/最大坐标构造 8 个角点，再连接成包围盒的 12 条棱。
             min_xyz, max_xyz = aabb
             x0, y0, z0 = min_xyz
             x1, y1, z1 = max_xyz
@@ -236,11 +257,15 @@ class PointCloudTeachingTool:
         self.preview_var.set("")
 
     def _base_cloud(self, label: str) -> o3d.geometry.PointCloud:
+        """返回当前点云的副本，避免演示步骤意外修改原数据。"""
+
         if self.cloud is None:
             raise RuntimeError("请先加载点云")
         return copy_cloud(self.cloud)
 
     def _trigger_step(self, key: str, action) -> None:
+        """更新示例代码并执行按钮对应的演示动作。"""
+
         self._show_step_code(key)
         try:
             action()
@@ -248,6 +273,8 @@ class PointCloudTeachingTool:
             self.status_var.set(str(exc))
 
     def _show_step_code(self, key: str) -> None:
+        """在中间文本框中展示当前课堂步骤的最小示例代码。"""
+
         mapping = {
             "load": "import open3d as o3d\ncloud = o3d.io.read_point_cloud('LidarCourse_CAMPUS.pcd')\nxyz = np.asarray(cloud.points)\nvalid = np.isfinite(xyz).all(axis=1)\ncloud.points = o3d.utility.Vector3dVector(xyz[valid])\nprint('点数:', len(xyz[valid]))",
             "cloud": "cloud.paint_uniform_color([0.8, 0.8, 0.9])\nbbox = cloud.get_axis_aligned_bounding_box()\nbbox.color = (1.0, 1.0, 0.0)\no3d.visualization.draw_geometries([cloud, bbox])",
@@ -275,6 +302,8 @@ class PointCloudTeachingTool:
         self.status_var.set(f"显示点云：{self.current_label}")
 
     def auto_play_demo(self) -> None:
+        """按预设顺序依次播放主要点云认知与处理步骤。"""
+
         if self.cloud is None:
             self.status_var.set("请先加载点云")
             return
@@ -309,6 +338,8 @@ class PointCloudTeachingTool:
         self.status_var.set(f"AABB 尺寸：{np.round(np.asarray(aabb.get_extent()), 3).tolist()}")
 
     def color_by(self, attr: str) -> None:
+        """按指定坐标轴的数值生成蓝—绿—红渐变色。"""
+
         cloud = self._base_cloud(f"按{attr}着色")
         xyz = np.asarray(cloud.points)
         if attr == "x":
@@ -317,6 +348,7 @@ class PointCloudTeachingTool:
             value = xyz[:, 1]
         else:
             value = xyz[:, 2]
+        # 用 2%～98% 分位数抑制极端值，再归一化到 [0, 1]。
         low, high = np.percentile(value, [2, 98])
         t = np.clip((value - low) / (high - low + 1e-9), 0.0, 1.0)
         colors = np.column_stack([t, 0.2 + 2.0 * t * (1 - t), 1.0 - t])
@@ -324,26 +356,36 @@ class PointCloudTeachingTool:
         self.status_var.set(f"按 {attr} 轴着色：范围 {low:.3f} ~ {high:.3f}")
 
     def downsample(self) -> None:
+        """使用体素网格降采样，减少点数并尽量保持整体形状。"""
+
         cloud = self._base_cloud("降采样")
         ds = cloud.voxel_down_sample(voxel_size=1.0)
         self._render_panel("6. 降采样", point_data=np.asarray(ds.points))
         self.status_var.set(f"降采样后点数：{len(np.asarray(ds.points)):,}")
 
     def remove_outliers(self) -> None:
+        """使用统计滤波去除与邻域距离差异较大的离群点。"""
+
         cloud = self._base_cloud("去离群点")
         filtered, _ = cloud.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.5)
         self._render_panel("7. 去离群点", point_data=np.asarray(filtered.points))
         self.status_var.set(f"去离群后点数：{len(np.asarray(filtered.points)):,}")
 
     def estimate_normals(self) -> None:
+        """基于局部邻域估计法向，并用 RGB 颜色编码法向方向。"""
+
         cloud = self._base_cloud("法向估计")
+        # 在半径 1.5 的邻域内最多取 30 个近邻进行局部平面拟合。
         cloud.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1.5, max_nn=30))
+        # 统一相邻法向的朝向，减少颜色显示中的突变。
         cloud.orient_normals_consistent_tangent_plane(30)
         self._render_panel("8. 法向估计", point_data=np.asarray(cloud.points), colors=np.asarray(cloud.normals) / 2 + 0.5)
         self.status_var.set(f"已估计法向，点数 {len(np.asarray(cloud.points)):,}")
 
 
 def copy_cloud(cloud: o3d.geometry.PointCloud) -> o3d.geometry.PointCloud:
+    """深拷贝点、颜色和法向，避免多个演示步骤共享底层数组。"""
+
     clone = o3d.geometry.PointCloud()
     clone.points = o3d.utility.Vector3dVector(np.asarray(cloud.points).copy())
     if cloud.has_colors():
@@ -354,6 +396,8 @@ def copy_cloud(cloud: o3d.geometry.PointCloud) -> o3d.geometry.PointCloud:
 
 
 def print_summary(path: Path) -> None:
+    """在无界面模式下输出点数、质心和轴对齐包围盒尺寸。"""
+
     cloud = o3d.io.read_point_cloud(str(path), remove_nan_points=False, remove_infinite_points=False)
     xyz = np.asarray(cloud.points)
     xyz = xyz[np.isfinite(xyz).all(axis=1)]
@@ -367,6 +411,8 @@ def print_summary(path: Path) -> None:
 
 
 def main() -> None:
+    """解析命令行参数，并按参数启动 GUI 或输出点云摘要。"""
+
     parser = argparse.ArgumentParser(description="LiDAR 点云课堂演示工具")
     parser.add_argument("--pcd", type=Path, default=None, help="可选：直接指定点云文件，不指定则启动后选择")
     parser.add_argument("--headless", action="store_true", help="仅输出统计，不打开 GUI")
@@ -378,6 +424,7 @@ def main() -> None:
         print_summary(args.pcd)
         return
 
+    # 短暂置顶，确保课堂投屏时窗口能显示到其他应用前方。
     root = tk.Tk()
     root.lift()
     root.attributes("-topmost", True)
